@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "impact-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173,
+      "url": "https://localhost:5173"
+    },
+    {
+      "name": "impact-dev-http",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:http"],
+      "port": 5173,
+      "url": "http://localhost:5173"
+    },
+    {
+      "name": "impact-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "preview", "--mode", "http"],
+      "port": 4173,
+      "url": "http://localhost:4173"
+    }
+  ]
+}

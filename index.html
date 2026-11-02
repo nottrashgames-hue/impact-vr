@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#0e1014" />
+    <title>IMPACT — VR Striking Simulator</title>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="overlay">
+      <div class="panel">
+        <h1>IMPACT</h1>
+        <p class="tagline">VR striking simulator</p>
+
+        <button id="enter-vr" type="button" disabled>Loading…</button>
+        <p id="xr-status" class="status"></p>
+
+        <div class="controls">
+          <h2>Desktop controls</h2>
+          <label class="slider">
+            <span>Punch speed</span>
+            <input id="punch-speed" type="range" min="1.5" max="12" step="0.5" value="6" />
+            <output id="punch-speed-value">6.0 m/s</output>
+          </label>
+          <ul>
+            <li><kbd>Click</kbd> punch at the cursor (alternating hands)</li>
+            <li><kbd>Drag</kbd> look around</li>
+            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</li>
+            <li><kbd>M</kbd> menu (settings, gore, debug)</li>
+            <li><kbd>G</kbd> gloves on / off</li>
+            <li><kbd>O</kbd> reset opponent</li>
+            <li><kbd>F</kbd> clean floor</li>
+            <li><kbd>R</kbd> recenter</li>
+            <li><kbd>H</kbd> performance HUD</li>
+            <li><kbd>B</kbd> hitboxes &amp; zones (hover to probe)</li>
+          </ul>
+          <h2>In VR</h2>
+          <ul>
+            <li><kbd>Punch</kbd> with controllers or closed fists</li>
+            <li><kbd>Palm up</kbd> (left hand) wrist menu · <kbd>X</kbd> pin it</li>
+            <li><kbd>Trigger</kbd> (right) or index finger poke: press menu buttons</li>
+            <li><kbd>Grip</kbd> / pinch at the rack: take or hang up gloves</li>
+            <li><kbd>A</kbd> reset after a knockout</li>
+            <li><kbd>Thumbstick click</kbd> recenter</li>
+            <li><kbd>Y</kbd> performance HUD</li>
+          </ul>
+        </div>
+
+        <p class="warning">Contains simulated violence and blood.</p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
