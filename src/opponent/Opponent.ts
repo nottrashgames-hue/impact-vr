@@ -103,7 +103,7 @@ export class Opponent {
     this.animator.update(0, new Vector3(WORLD.playerSpawnX, 1.6, WORLD.playerSpawnZ));
     this.hitboxes = new Hitboxes(physics, rig, this.rest);
     scene.add(this.hitboxes.debugGroup);
-    this.ragdoll = new Ragdoll(physics, rig, this.hitboxes);
+    this.ragdoll = new Ragdoll(physics, rig, this.hitboxes, this.rest);
     this.metersPerBindUnit = this.skinMatrix('Hips', _inv).getMaxScaleOnAxis();
   }
 
@@ -194,6 +194,16 @@ export class Opponent {
       return;
     }
     this.reactions.applyImpact(impact);
+  }
+
+  /**
+   * A glove pressing on him (no punch): bends and shoves the standing body
+   * (Section 4). While knocked out, the fist bodies push the ragdoll physically.
+   */
+  push(collider: RAPIER.Collider, point: Vector3, force: Vector3, dt: number): void {
+    if (this._state !== 'standing') return;
+    const info = this.hitboxes.lookup(collider);
+    if (info) this.reactions.push(info.bone, point, force, dt);
   }
 
   private knockOut(impact: Impact): void {

@@ -17,6 +17,8 @@ export class PlayerRig {
   readonly root = new Group();
   /** Extra rig height when the runtime only provides a 'local' (head-origin) space. */
   private floorOffset = 0;
+  /** VR height calibration: raises/lowers the player to the opponent's eye level. */
+  private heightOffset = 0;
 
   constructor(readonly camera: PerspectiveCamera) {
     this.root.name = 'player-rig';
@@ -26,13 +28,24 @@ export class PlayerRig {
   /** 0 for 'local-floor'; eye height for 'local' (whose origin is at the head). */
   setFloorOffset(offset: number): void {
     this.floorOffset = offset;
-    this.root.position.y = offset;
+    this.root.position.y = offset + this.heightOffset;
+  }
+
+  setHeightOffset(offset: number): void {
+    this.heightOffset = offset;
+    this.root.position.y = this.floorOffset + offset;
+    this.root.updateMatrixWorld(true);
+  }
+
+  /** VR: the tracked eye height above the floor, without the calibration offset. */
+  trackedEyeHeight(): number {
+    return this.camera.position.y + this.floorOffset;
   }
 
   /** Desktop mode: stand at the spawn point at a fixed eye height. */
   resetDesktop(): void {
     this.floorOffset = 0;
-    this.root.position.set(WORLD.playerSpawnX, 0, WORLD.playerSpawnZ);
+    this.root.position.set(WORLD.playerSpawnX, this.heightOffset, WORLD.playerSpawnZ);
     this.root.rotation.set(0, 0, 0);
     this.camera.position.set(0, WORLD.desktopEyeHeight, 0);
     // XR overwrites the camera FOV with the headset's; restore ours.
@@ -52,7 +65,7 @@ export class PlayerRig {
 
     _head.set(headPosition.x, 0, headPosition.z).applyAxisAngle(UP, rigYaw);
     this.root.rotation.set(0, rigYaw, 0);
-    this.root.position.set(WORLD.playerSpawnX - _head.x, this.floorOffset, WORLD.playerSpawnZ - _head.z);
+    this.root.position.set(WORLD.playerSpawnX - _head.x, this.floorOffset + this.heightOffset, WORLD.playerSpawnZ - _head.z);
     this.root.updateMatrixWorld(true);
   }
 }

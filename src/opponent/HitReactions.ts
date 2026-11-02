@@ -73,7 +73,9 @@ function regionOf(bone: CanonicalBone): Region {
 const STAGGER = [0.03, 0.13, 0.17, 0.2];
 const BODY_K = 14;
 const BODY_C = 2 * 0.8 * Math.sqrt(BODY_K);
-const BODY_MAX = 0.25;
+const BODY_MAX = 0.32;
+/** Contact pushes: spring torque per (m · m/s²), times the chain's gain. */
+const PUSH_TWIST = 2;
 const DROP_K = 30;
 const DROP_C = 2 * 0.7 * Math.sqrt(DROP_K);
 
@@ -171,6 +173,27 @@ export class HitReactions {
     } else {
       this.flinch = Math.max(this.flinch, 0.5);
     }
+  }
+
+  /**
+   * Continuous contact: a glove pressing on the body (not a punch). `force` is
+   * a world-space acceleration (m/s²) applied at `point` for `dt` seconds; it
+   * bends the struck chain and shoves the stance, and the feet step after it.
+   */
+  push(bone: CanonicalBone, point: Vector3, force: Vector3, dt: number): void {
+    const region = regionOf(bone);
+    const chain = CHAINS[region];
+    for (const [name, weight] of chain.bones) {
+      const spring = this.springByBone.get(name);
+      if (!spring) continue;
+      spring.bone.getWorldPosition(_pivot);
+      _r.subVectors(point, _pivot);
+      _torque.crossVectors(_r, force).multiplyScalar(PUSH_TWIST * chain.gain * weight * dt);
+      spring.omega.add(_torque);
+    }
+    this.rig.root.getWorldQuaternion(_rootInv).invert();
+    _dirChar.copy(force).applyQuaternion(_rootInv).setY(0);
+    this.bodyVelocity.addScaledVector(_dirChar, (region === 'legs' ? 0.3 : 1) * dt);
   }
 
   /**

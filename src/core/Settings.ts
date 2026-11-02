@@ -24,6 +24,10 @@ export interface Settings {
   gloveColor: GloveColor;
   gloveWeight: GloveWeight;
   opponentMode: OpponentMode;
+  /** VR: metres added to the player's tracked height ("Match height" calibration). */
+  heightOffset: number;
+  /** VR: smooth turning with the right stick instead of 30° snap turns. */
+  smoothTurn: boolean;
   showHud: boolean;
   showHitboxes: boolean;
   showRenderTargets: boolean;
@@ -47,6 +51,8 @@ function defaults(): Settings {
     gloveColor: 'red',
     gloveWeight: 12,
     opponentMode: 'passive',
+    heightOffset: 0,
+    smoothTurn: false,
     showHud: URL_FLAGS.debug,
     showHitboxes: false,
     showRenderTargets: false,

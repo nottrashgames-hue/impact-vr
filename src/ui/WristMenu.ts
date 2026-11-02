@@ -9,6 +9,8 @@ export interface MenuActions {
   cleanFloor(): void;
   resetAll(): void;
   recenter(): void;
+  /** VR: raise/lower the player so their eyes are level with the opponent's. */
+  matchHeight(): void;
 }
 
 type Page = 'main' | 'gore' | 'debug';
@@ -40,7 +42,11 @@ export class WristMenu {
     private readonly actions: MenuActions,
   ) {
     this.build();
-    settings.subscribe(() => this.panel.invalidate());
+    settings.subscribe((_s, changed) => {
+      // The height label's text is baked into its widget.
+      if (changed.has('heightOffset')) this.build();
+      else this.panel.invalidate();
+    });
 
     // Desktop: the same canvas as a clickable overlay.
     this.panel.canvas.className = 'wrist-menu hidden';
@@ -107,7 +113,7 @@ export class WristMenu {
     const tabs: [Page, string][] = [
       ['main', 'Gloves & Opponent'],
       ['gore', 'Gore & Quality'],
-      ['debug', 'Debug'],
+      ['debug', 'Player & Debug'],
     ];
     const tabW = (W - PAD * 2 - 16) / 3;
     tabs.forEach(([page, text], i) => {
@@ -250,6 +256,24 @@ export class WristMenu {
         (q) => this.set('quality', q),
       );
     } else {
+      header('Player (VR)');
+      buttons([
+        ['Match opponent height', () => this.actions.matchHeight()],
+        ['Reset height', () => this.set('heightOffset', 0)],
+      ]);
+      buttons([
+        ['Smooth turning', () => this.set('smoothTurn', !s().smoothTurn), () => s().smoothTurn],
+        ['Recenter', () => this.actions.recenter()],
+      ]);
+      widgets.push({
+        kind: 'label',
+        x: PAD,
+        y,
+        w: W - PAD * 2,
+        h: 30,
+        text: `Height offset ${s().heightOffset >= 0 ? '+' : ''}${(s().heightOffset * 100).toFixed(0)} cm · left stick walk · right stick turn`,
+      });
+      y += 40;
       header('Debug');
       buttons([
         ['Performance HUD', () => this.set('showHud', !s().showHud), () => s().showHud],
@@ -259,7 +283,6 @@ export class WristMenu {
         ['Render targets', () => this.set('showRenderTargets', !s().showRenderTargets), () => s().showRenderTargets],
         ['Stats panel', () => this.set('showStats', !s().showStats), () => s().showStats],
       ]);
-      buttons([['Recenter', () => this.actions.recenter()]]);
       widgets.push({
         kind: 'label',
         x: PAD,

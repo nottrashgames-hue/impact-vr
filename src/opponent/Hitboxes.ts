@@ -69,6 +69,7 @@ export interface HitboxInfo {
 }
 
 interface BodyEntry {
+  readonly name: CanonicalBone;
   readonly bone: Bone;
   readonly body: RAPIER.RigidBody;
   readonly debug: { readonly mesh: Mesh; readonly local: Matrix4 }[];
@@ -76,6 +77,28 @@ interface BodyEntry {
 
 const UP = new Vector3(0, 1, 0);
 const BODY_DENSITY = 985;
+/**
+ * Share of total body mass per segment (Dempster / Winter anthropometric
+ * tables; the feet are folded into the shins). Densities are rescaled per
+ * body so the ragdoll's weight sits where a real body's does.
+ */
+const SEGMENT_MASS: Partial<Record<CanonicalBone, number>> = {
+  Head: 0.069,
+  Neck: 0.012,
+  Spine2: 0.216,
+  Spine1: 0.139,
+  Hips: 0.142,
+  LeftArm: 0.028,
+  RightArm: 0.028,
+  LeftForeArm: 0.016,
+  RightForeArm: 0.016,
+  LeftHand: 0.006,
+  RightHand: 0.006,
+  LeftUpLeg: 0.1,
+  RightUpLeg: 0.1,
+  LeftLeg: 0.061,
+  RightLeg: 0.061,
+};
 const _p = new Vector3();
 const _q = new Quaternion();
 const _s = new Vector3();
@@ -100,7 +123,11 @@ export class Hitboxes {
     this.debugGroup.name = 'hitbox-debug';
     this.debugGroup.visible = false;
     const s = rig.height / 1.8;
-    const groups = interactionGroups(COLLISION_GROUP.OPPONENT, COLLISION_GROUP.PLAYER | COLLISION_GROUP.STATIC);
+    // Torso-side parts accept self-collision from the ragdoll's limbs (they never touch each other).
+    const groups = interactionGroups(
+      COLLISION_GROUP.OPPONENT,
+      COLLISION_GROUP.PLAYER | COLLISION_GROUP.STATIC | COLLISION_GROUP.OPPONENT_SELF,
+    );
     const bodies = new Map<Bone, BodyEntry>();
     const restPos = new Vector3();
     const restQuat = new Quaternion();
@@ -119,7 +146,7 @@ export class Hitboxes {
         const body = physics.world.createRigidBody(
           RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(_p.x, _p.y, _p.z).setRotation(_q),
         );
-        entry = { bone, body, debug: [] };
+        entry = { name: def.bone, bone, body, debug: [] };
         bodies.set(bone, entry);
         this.entries.push(entry);
       }
@@ -157,6 +184,25 @@ export class Hitboxes {
       mesh.name = `hitbox:${def.name}`;
       this.debugGroup.add(mesh);
       entry.debug.push({ mesh, local: new Matrix4().compose(localPos, localRot, new Vector3(1, 1, 1)) });
+    }
+    this.distributeMass();
+  }
+
+  /** Keeps the total mass (density × volume) but redistributes it per segment. */
+  private distributeMass(): void {
+    const volumeOf = (body: RAPIER.RigidBody): number => {
+      let v = 0;
+      for (let i = 0; i < body.numColliders(); i++) v += body.collider(i).volume();
+      return v;
+    };
+    const total = this.entries.reduce((sum, e) => sum + volumeOf(e.body), 0) * BODY_DENSITY;
+    const share = this.entries.reduce((sum, e) => sum + (SEGMENT_MASS[e.name] ?? 0), 0);
+    for (const entry of this.entries) {
+      const fraction = SEGMENT_MASS[entry.name];
+      const volume = volumeOf(entry.body);
+      if (!fraction || volume <= 0) continue;
+      const density = ((fraction / share) * total) / volume;
+      for (let i = 0; i < entry.body.numColliders(); i++) entry.body.collider(i).setDensity(density);
     }
   }
 

@@ -2,6 +2,7 @@ import {
   type Material,
   Mesh,
   type Object3D,
+  type Vector2,
   type WebGLRenderer,
   type XRGripSpace,
   type XRHandSpace,
@@ -135,6 +136,15 @@ export class XRInput {
         slot.wasPressed[b] = pressed;
       }
     }
+  }
+
+  /**
+   * Thumbstick deflection (-1..1 per axis; y is negative when pushed forward),
+   * zero for tracked hands or a missing controller (`xr-standard` axes 2/3).
+   */
+  thumbstick(side: Handedness, out: Vector2): Vector2 {
+    const axes = this.slotFor(side)?.source?.gamepad?.axes;
+    return out.set(axes?.[2] ?? 0, axes?.[3] ?? 0);
   }
 
   /** Short haptic pulse on a controller. `intensity` 0..1, `durationMs` in milliseconds. */

@@ -30,7 +30,9 @@ import type { HumanoidRig } from '../opponent/HumanoidRig';
 import { loadOpponentRig, Opponent } from '../opponent/Opponent';
 import { OpponentBrain } from '../opponent/OpponentBrain';
 import { FistColliders } from '../player/FistColliders';
+import { GloveContact } from '../player/GloveContact';
 import { GloveRack } from '../player/GloveRack';
+import { Locomotion } from '../player/Locomotion';
 import { PlayerHands } from '../player/PlayerHands';
 import { DESKTOP_FOV, PlayerRig } from '../player/PlayerRig';
 import { PunchDetector } from '../player/PunchDetector';
@@ -82,6 +84,8 @@ export class App {
   private readonly visor: VisorSplatter;
   private readonly fistColliders: FistColliders;
   private readonly punches: PunchDetector;
+  private readonly contact: GloveContact;
+  private readonly locomotion: Locomotion;
   private readonly knockoutPrompt = new WorldPrompt();
   private readonly pointer: UIPointer;
   private readonly stats: StatsPanel;
@@ -158,6 +162,9 @@ export class App {
     this.fistColliders = new FistColliders(physics, this.hands);
     this.punches = new PunchDetector(physics, this.opponent, this.hands);
     this.hits = new HitPipeline(this.damage, this.opponent, this.audio, this.input);
+    // Gloves resting on him push him around; thumbsticks walk and turn in VR.
+    this.contact = new GloveContact(physics, this.hands, this.opponent, this.input);
+    this.locomotion = new Locomotion(this.rig, this.camera, this.input);
 
     // Gloves (Milestone 4): rack beside the player, grab to equip; the menu equips both hands.
     this.rack = new GloveRack(this.scene);
@@ -202,6 +209,7 @@ export class App {
       cleanFloor: () => this.blood.cleanFloor(this.renderer),
       resetAll: () => this.resetAll(),
       recenter: () => this.recenter(),
+      matchHeight: () => this.matchHeight(),
     });
     this.scene.add(this.menu.panel.mesh);
     this.pointer = new UIPointer(this.scene, this.input);
@@ -278,6 +286,17 @@ export class App {
     if (changed.has('showStats')) this.stats.setVisible(s.showStats, this.renderer.xr.isPresenting);
     if (changed.has('opponentMode')) this.brain.setMode(s.opponentMode);
     if (changed.has('koRecovery')) this.opponent.koRecovery = s.koRecovery;
+    if (changed.has('heightOffset')) this.rig.setHeightOffset(s.heightOffset);
+  }
+
+  /** Height calibration: puts the player's eyes level with the opponent's (saved in settings). */
+  private matchHeight(): void {
+    const opponentEyes = this.opponent.rig.headCenter.y;
+    const playerEyes = this.renderer.xr.isPresenting ? this.rig.trackedEyeHeight() : WORLD.desktopEyeHeight;
+    const offset = Math.max(-1, Math.min(1, opponentEyes - playerEyes));
+    this.settings.set({ heightOffset: Math.round(offset * 100) / 100 });
+    this.input.pulse('left', 0.3, 40);
+    this.input.pulse('right', 0.3, 40);
   }
 
   /** Quality presets (Section 11): particle cap, paint resolutions, shadows, foveation. */
@@ -316,13 +335,18 @@ export class App {
   private update(dt: number, alpha: number, frame: XRFrame | undefined): void {
     this.elapsed += dt;
     const inXR = this.renderer.xr.isPresenting;
+    const settings = this.settings.current;
     if (inXR) {
       this.input.update();
       if (this.pendingRecenter && frame) this.tryRecenter(frame);
+      if (this.locomotion.update(dt, settings.smoothTurn)) {
+        // A snap turn swings the fists around with the rig: don't sweep that as a punch.
+        this.hands.resetTracking();
+        this.punches.reset();
+      }
     } else {
       this.desktop.update(dt);
     }
-    const settings = this.settings.current;
 
     // Player hands -> fist bodies -> sweep for hits against the opponent.
     this.hands.update(this.loop.frameTime, inXR, settings.dryingSpeed);
@@ -334,6 +358,7 @@ export class App {
         this.fistColliders.suspend(this.elapsed, 0.5);
       }
     });
+    this.contact.update(dt);
     this.damage.update(dt);
 
     // The opponent watches the player's head (last rendered camera pose in VR).
@@ -496,7 +521,8 @@ export class App {
 
   /**
    * VR buttons: grip = grab at the rack; right trigger = click the menu; X = menu;
-   * Y = HUD; A = reset after a knockout; thumbstick click = recenter.
+   * Y = HUD; A = reset after a knockout; B = match the opponent's height;
+   * thumbstick click = recenter. The sticks themselves walk and turn (Locomotion).
    */
   private onXRButton(side: Handedness, button: XRButtonName): void {
     if (button === 'squeeze') {
@@ -512,6 +538,8 @@ export class App {
       this.menu.pinned = !this.menu.pinned;
     } else if (button === 'primary' && side === 'right' && this.opponent.state === 'knockedOut') {
       this.resetOpponent();
+    } else if (button === 'secondary' && side === 'right') {
+      this.matchHeight();
     }
   }
 

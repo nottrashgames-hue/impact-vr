@@ -7,6 +7,8 @@ export const COLLISION_GROUP = {
   STATIC: 1 << 0,
   OPPONENT: 1 << 1,
   PLAYER: 1 << 2,
+  /** Ragdoll limbs that collide with the opponent's own body (set while knocked out). */
+  OPPONENT_SELF: 1 << 3,
 } as const;
 
 export function interactionGroups(membership: number, filter: number): number {

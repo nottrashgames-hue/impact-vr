@@ -109,13 +109,16 @@ export class BloodSystem {
       this.startSource('mouth', 'mouth', this.nearest(this.mouthCorners, _bind), 0.4 + 0.15 * tier);
     }
 
-    // Splatter (Section 7.6): hitting a bleeding area throws blood along the punch.
+    // Splatter (Section 7.6): hitting a bleeding or blood-covered area throws blood
+    // along the punch; the more blood already on the skin (and on the glove), the bigger the spray.
+    const hand = this.hands.get(impact.side);
     const bleeding = this.bleedingAt(impact.zone);
-    if (bleeding > 0.05) this.splatter(impact, bleeding, bleedMult, scale);
+    const surfaceBlood = this.ledger.query(_bind, 0.04 * this.unit, SKIN_DRY_TIME);
+    const bloody = bleeding + surfaceBlood + 0.3 * hand.coating.load;
+    if (bloody > 0.05) this.splatter(impact, Math.min(2.5, bloody), bleedMult, scale);
 
     // Transfer (Section 7.5): blood under the punch coats the glove/knuckles...
-    const hand = this.hands.get(impact.side);
-    const wetHere = Math.min(1.5, this.ledger.query(_bind, 0.03 * this.unit, SKIN_DRY_TIME) + bleeding);
+    const wetHere = Math.min(1.5, surfaceBlood + bleeding);
     if (wetHere > 0.05) {
       hand.worldToMesh(impact.point, _local);
       const radius = impact.gear.kind === 'glove' ? 0.022 : 0.014;
@@ -261,9 +264,22 @@ export class BloodSystem {
    * the skin (it can't go through the head), lifted off the surface, at a
    * fraction of the punch speed. Lands on the floor, the body and the gloves.
    */
-  private splatter(impact: Impact, bleeding: number, bleedMult: number, scale: number): void {
+  private splatter(impact: Impact, bloody: number, bleedMult: number, scale: number): void {
     const strength = Math.min(1, (impact.speed - 1) / 8);
-    const count = Math.round((8 + 30 * strength) * Math.sqrt(bleeding) * scale * bleedMult);
+    // Wet blood flies off whatever hits it, so the gear damps it only slightly.
+    const count = Math.round((10 + 50 * strength) * Math.pow(bloody, 0.8) * scale * Math.sqrt(bleedMult));
+    // Hard shots on a soaked face also throw a fine, fast mist.
+    const mist = strength > 0.45 && bloody > 0.6 ? Math.round(count * 0.5) : 0;
+    for (let i = 0; i < mist; i++) {
+      _v.copy(impact.normal)
+        .multiplyScalar(0.6)
+        .addScaledVector(impact.direction, 0.5)
+        .add(_w.set(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).multiplyScalar(1.4))
+        .normalize()
+        .multiplyScalar(impact.speed * (0.35 + Math.random() * 0.45));
+      _w.copy(impact.point).addScaledVector(impact.normal, 0.015);
+      this.particles.spawn(_w, _v, 0.0005 + Math.random() * 0.0008);
+    }
     const n = impact.normal;
     // Tangential part of the punch direction (along the skin, away from the fist).
     _tangent.copy(impact.direction).addScaledVector(n, -impact.direction.dot(n));
