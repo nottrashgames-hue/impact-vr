@@ -1,5 +1,15 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
-import { type Camera, FrontSide, Matrix4, Ray, type Scene, Vector3, Vector4, type WebGLRenderer } from 'three';
+import {
+  type Camera,
+  FrontSide,
+  Matrix4,
+  type MeshStandardMaterial,
+  Ray,
+  type Scene,
+  Vector3,
+  Vector4,
+  type WebGLRenderer,
+} from 'three';
 import type { AudioSystem } from '../audio/AudioSystem';
 import type { Physics } from '../core/Physics';
 import { bloodScale, type SettingsStore } from '../core/Settings';
@@ -12,6 +22,7 @@ import type { Opponent } from '../opponent/Opponent';
 import type { PlayerHands } from '../player/PlayerHands';
 import { BLOOD_MAP, BLOOD_TINTS, type SkinSurface } from '../skin/SkinSurface';
 import { StampKind } from '../skin/SurfacePainter';
+import { BloodCoating } from './BloodCoating';
 import { BloodParticles } from './BloodParticles';
 import type { FloorBlood } from './FloorBlood';
 import { BloodLedger, SurfaceFlow } from './SurfaceFlow';
@@ -39,6 +50,8 @@ const _local = new Vector3();
 const _m = new Matrix4();
 const _ray = new Ray();
 const _tangent = new Vector3();
+const _dir = new Vector3();
+const _glove = new Vector3();
 
 /**
  * Everything blood (Sections 6–7): bleed sources (nosebleed, split lip, cuts)
@@ -58,6 +71,8 @@ export class BloodSystem {
   /** Pending little exhale sprays after heavy hits to a bleeding nose. */
   private breathSprays: number[] = [];
   private dripSoundBudget = 0;
+  /** Blood on the opponent's own gloves (bind space of his gear mesh), if his rig has them. */
+  private readonly opponentGloves: BloodCoating | null = null;
 
   constructor(
     scene: Scene,
@@ -78,6 +93,11 @@ export class BloodSystem {
       this.particles.spawn(world, _v.set((Math.random() - 0.5) * 0.05, -0.25, (Math.random() - 0.5) * 0.05), radius);
     });
     this.locateFaceSources();
+    const gear = opponent.rig.skinnedMeshes.find((m) => m.name === 'opponent-gear');
+    if (gear) {
+      this.opponentGloves = new BloodCoating(opponent.metersPerBindUnit);
+      this.opponentGloves.attach(gear.material as MeshStandardMaterial);
+    }
     settings.subscribe((s) => {
       const tint = BLOOD_TINTS[s.bloodColor];
       this.particles.setColor(tint);
@@ -85,6 +105,7 @@ export class BloodSystem {
       this.floor.setTint(tint, bloodScale(s) > 0);
       this.visor.setColor(tint);
       for (const hand of hands.both) hand.coating.setTint(tint);
+      this.opponentGloves?.setTint(tint);
     });
   }
 
@@ -117,12 +138,25 @@ export class BloodSystem {
     const bloody = bleeding + surfaceBlood + 0.3 * hand.coating.load;
     if (bloody > 0.05) this.splatter(impact, Math.min(2.5, bloody), bleedMult, scale);
 
-    // Transfer (Section 7.5): blood under the punch coats the glove/knuckles...
+    // His guard: a bloody glove or fist leaves its blood on his gloves.
+    if ((impact.bone === 'LeftHand' || impact.bone === 'RightHand') && hand.coating.load > 0.05 && this.opponentGloves) {
+      const taken = hand.coating.take(0.25);
+      _dir.crossVectors(impact.direction, _v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)).normalize();
+      this.opponentGloves.splash(_bind, 0.02 * this.unit, Math.min(1, 0.3 + taken), _dir, 2);
+    }
+
+    // Transfer (Section 7.5): blood under the punch smears onto the glove/knuckles, with
+    // fine specks flicked around it; harder punches into more blood leave bigger marks.
     const wetHere = Math.min(1.5, surfaceBlood + bleeding);
-    if (wetHere > 0.05) {
-      hand.worldToMesh(impact.point, _local);
-      const radius = impact.gear.kind === 'glove' ? 0.022 : 0.014;
-      hand.coating.add(_local, radius, Math.min(1, wetHere * 0.7));
+    if (wetHere > 0.03) {
+      hand.surfacePoint(impact.point, _local);
+      // Smeared across the knuckles, sideways to the punch.
+      _dir.crossVectors(impact.direction, _v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)).normalize();
+      hand.worldDirToMesh(_dir, _tangent);
+      const glove = impact.gear.kind === 'glove';
+      const radius = (glove ? 0.02 : 0.013) * (0.8 + 0.25 * tier) * (0.8 + 0.4 * Math.min(1, wetHere));
+      const specks = Math.round(1 + tier + 3 * Math.min(1, wetHere) * Math.random());
+      hand.coating.splash(_local, radius, Math.min(1, 0.25 + wetHere * 0.6), _tangent, specks);
     } else if (hand.coating.load > 0.08) {
       // ...and a bloody glove prints onto clean skin.
       const taken = hand.coating.take(0.35);
@@ -177,6 +211,8 @@ export class BloodSystem {
     }
 
     if (this.opponent.state !== 'knockedOut') this.flow.update(dt, scale);
+    if (scale > 0) this.bloodyOwnGloves(dt);
+    this.opponentGloves?.update(dt, s.dryingSpeed);
     this.dripSoundBudget = Math.min(6, this.dripSoundBudget + dt * 6);
     this.particles.update(dt, {
       floor: (x, z, velocity, radius) => {
@@ -200,6 +236,33 @@ export class BloodSystem {
     this.ledger.clear();
     this.breathSprays.length = 0;
     for (const hand of this.hands.both) hand.coating.clear();
+    this.opponentGloves?.clear();
+  }
+
+  /**
+   * His gloves pick up his own blood when they are held against a bleeding
+   * face (high guard, covering up): the side of the glove facing the wound
+   * gets dabbed now and then.
+   */
+  private bloodyOwnGloves(dt: number): void {
+    if (!this.opponentGloves || this.sources.length === 0) return;
+    for (const side of ['Left', 'Right'] as const) {
+      const hand = this.opponent.rig.bones[`${side}Hand`];
+      const tip = this.opponent.rig.bones[`${side}HandTip`];
+      hand.getWorldPosition(_glove);
+      if (tip) _glove.lerp(tip.getWorldPosition(_v), 0.6);
+      for (const src of this.sources) {
+        const wound = this.opponent.fromBind(src.points[0], 'Head', _w);
+        const distance = wound.distanceTo(_glove);
+        if (distance > 0.14 || Math.random() > dt * 2.5 * src.severity) continue;
+        // The glove surface facing the wound.
+        _v.subVectors(wound, _glove).normalize();
+        _local.copy(_glove).addScaledVector(_v, 0.055);
+        this.opponent.toBind(_local, `${side}Hand`, _bind);
+        _dir.set(0, -1, 0); // runs down the glove
+        this.opponentGloves.add(_bind, (0.008 + 0.012 * src.severity) * this.unit, 0.35 + 0.5 * src.severity, { direction: _dir, stretch: 1.6 });
+      }
+    }
   }
 
   cleanFloor(renderer: WebGLRenderer): void {
@@ -378,8 +441,8 @@ export class BloodSystem {
     for (const hand of this.hands.both) {
       if (!hand.tracked) continue;
       if (hand.strikePoint.distanceTo(point) > hand.gear.strikeRadius * 1.3 + radius) continue;
-      hand.worldToMesh(point, _local);
-      hand.coating.add(_local, 0.006 + radius, 0.25);
+      hand.surfacePoint(point, _local);
+      hand.coating.add(_local, 0.004 + radius * 1.6, 0.55);
       return true;
     }
     return false;

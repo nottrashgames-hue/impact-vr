@@ -15,6 +15,15 @@ interface LimbSetup {
   readonly lowerAxis: Vector3;
 }
 
+export interface HandOverride {
+  readonly target: Vector3;
+  weight: number;
+  /** World direction the fingers (glove) point; zero = the guard's. */
+  readonly aim: Vector3;
+  /** World direction the elbow bends towards; zero = the guard's. */
+  readonly pole: Vector3;
+}
+
 /** A foot is planted (t < 0) or stepping from `from` to its desired spot (t in 0..1). */
 interface FootState {
   readonly planted: Vector3;
@@ -68,6 +77,9 @@ const _headFrameInv = new Quaternion();
 const _e = new Euler();
 const _chest = new Matrix4();
 const _stepTo = new Vector3();
+const _u = new Vector3();
+/** Share of the torso twist / lean / roll taken by the hips, Spine, Spine1 and Spine2. */
+const TORSO_SHARE = [0.3, 0.15, 0.25, 0.3] as const;
 
 /**
  * Procedural idle (Section 3 "Pose & behavior"): guard stance with planted feet
@@ -97,11 +109,19 @@ export class IdleAnimator {
   readonly eyeClosure: Record<Side, number> = { Left: 0, Right: 0 };
   /** AI hooks (OpponentBrain): 0..1 high guard covering the face. */
   guardRaise = 0;
-  /** AI hooks: per-hand world-space IK target override (blocks, jabs), blended by weight. */
-  readonly handOverride: Record<Side, { readonly target: Vector3; weight: number }> = {
-    Left: { target: new Vector3(), weight: 0 },
-    Right: { target: new Vector3(), weight: 0 },
+  /**
+   * AI hooks: per-hand world-space IK target override (punches, blocks, parries), blended
+   * by weight, with optional world directions for the glove (fingers) and the elbow pole.
+   */
+  readonly handOverride: Record<Side, HandOverride> = {
+    Left: { target: new Vector3(), weight: 0, aim: new Vector3(), pole: new Vector3() },
+    Right: { target: new Vector3(), weight: 0, aim: new Vector3(), pole: new Vector3() },
   };
+  /**
+   * AI hooks: upper-body rotation on top of the stance (radians): twist (+ brings the
+   * right shoulder forward), forward lean, and roll (+ tips the head to his right).
+   */
+  readonly torso = { twist: 0, lean: 0, roll: 0 };
   /** AI hooks: extra hip offset in character space (leaning into a jab); the feet stay put. */
   readonly extraOffset = new Vector3();
 
@@ -191,7 +211,7 @@ export class IdleAnimator {
     _v.z += 0.008 * s * Math.sin((2 * Math.PI * time) / 7.1 + 1) + reactions.bodyOffset.z + this.extraOffset.z;
     root.localToWorld(_v);
     b.Hips.position.copy(b.Hips.parent ? b.Hips.parent.worldToLocal(_v) : _v);
-    _bodyQ.copy(_rootQ).multiply(_q.setFromEuler(_e.set(0, STANCE.hipsYaw, 0)));
+    _bodyQ.copy(_rootQ).multiply(_q.setFromEuler(_e.set(0, STANCE.hipsYaw + TORSO_SHARE[0] * this.torso.twist, 0)));
     _q.copy(_bodyQ).multiply(_q2.setFromEuler(_e.set(0, 0, 0.02 * sway)));
     setWorldQuaternion(b.Hips, _q.multiply(rest.characterQuaternion(b.Hips, _q2)));
     _bodyInv.copy(_bodyQ).invert();
@@ -201,9 +221,10 @@ export class IdleAnimator {
     for (let i = 0; i < spine.length; i++) {
       const bone = spine[i];
       if (!bone) continue;
-      const pitch = STANCE.lean[i] - (i > 0 ? 0.015 * breath : 0);
-      const yaw = i === 2 ? STANCE.chestCounterYaw : 0;
-      this.rotateInBodyFrame(bone, pitch, yaw, 0);
+      const share = TORSO_SHARE[i + 1];
+      const pitch = STANCE.lean[i] - (i > 0 ? 0.015 * breath : 0) + share * this.torso.lean;
+      const yaw = (i === 2 ? STANCE.chestCounterYaw : 0) + share * this.torso.twist;
+      this.rotateInBodyFrame(bone, pitch, yaw, share * this.torso.roll);
     }
     for (const [bone, sign] of [
       [b.LeftShoulder, 1],
@@ -243,11 +264,17 @@ export class IdleAnimator {
       _v.x -= Math.sign(hand.offset.x) * 0.04 * s * this.guardRaise;
       _v.applyMatrix4(_chest);
       const override = this.handOverride[side];
-      if (override.weight > 0) _v.lerp(override.target, Math.min(1, override.weight));
+      const w = Math.min(1, override.weight);
+      if (w > 0) _v.lerp(override.target, w);
       _w.copy(hand.elbowPole).transformDirection(_chest);
+      if (w > 0 && override.pole.lengthSq() > 0) _w.lerp(_u.copy(override.pole).normalize(), w).normalize();
       solveTwoBone(arm.upper, arm.lower, arm.end, _v, _w, arm.upperAxis, arm.lowerAxis);
       const tip = this.handTipAxis[side];
-      if (tip) aimBone(arm.end, tip, _w.copy(hand.aim).transformDirection(_chest));
+      if (tip) {
+        _w.copy(hand.aim).transformDirection(_chest);
+        if (w > 0 && override.aim.lengthSq() > 0) _w.lerp(_u.copy(override.aim).normalize(), w).normalize();
+        aimBone(arm.end, tip, _w);
+      }
     }
 
     this.updateHeadAndEyes(time, lookAt);

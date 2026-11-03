@@ -243,6 +243,11 @@ export class HitReactions {
     this.flinch = Math.max(0, this.flinch - dt * 4);
   }
 
+  /** Footwork: eases the body's drift towards a character-space velocity (m/s) he walks at. */
+  walk(velocity: Vector3, dt: number): void {
+    this.bodyVelocity.lerp(velocity, Math.min(1, 6 * dt));
+  }
+
   /** Moves the accumulated drift into `out` (character space) and zeroes it; the caller moves the root. */
   takeDrift(out: Vector3): Vector3 {
     out.copy(this.bodyOffset);

@@ -364,7 +364,7 @@ export class App {
 
     // The opponent watches the player's head (last rendered camera pose in VR).
     this.camera.getWorldPosition(_headPos);
-    this.brain.update(dt, _headPos);
+    this.brain.update(dt, _headPos, this.damage.fatigue);
     this.opponent.setEyeClosure(this.injuries.eyeClosure('eyeLeft'), this.injuries.eyeClosure('eyeRight'));
     this.opponent.update(dt, this.elapsed, _headPos, alpha, this.damage.fatigue);
     // He no longer stays on his spawn spot: keep the key light (and its shadow) on him.

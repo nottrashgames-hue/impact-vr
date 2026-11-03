@@ -50,7 +50,7 @@ function defaults(): Settings {
     glovesOn: false,
     gloveColor: 'red',
     gloveWeight: 12,
-    opponentMode: 'passive',
+    opponentMode: 'sparring',
     heightOffset: 0,
     smoothTurn: false,
     showHud: URL_FLAGS.debug,
@@ -79,6 +79,11 @@ export class SettingsStore {
 
   constructor() {
     this.value = { ...defaults(), ...this.load() };
+    // One-off: since the combat update the opponent fights back, even for players who saved another mode.
+    if (this.firstRunOf('impact.migrated.fightBack')) {
+      this.value.opponentMode = 'sparring';
+      this.save();
+    }
     if (isQualityLevel(URL_FLAGS.quality)) this.value.quality = URL_FLAGS.quality;
   }
 
@@ -122,6 +127,17 @@ export class SettingsStore {
       return result;
     } catch {
       return {};
+    }
+  }
+
+  /** True the first time `key` is seen in this browser (false if storage is unavailable). */
+  private firstRunOf(key: string): boolean {
+    try {
+      if (window.localStorage.getItem(key)) return false;
+      window.localStorage.setItem(key, '1');
+      return true;
+    } catch {
+      return false;
     }
   }
 

@@ -198,7 +198,7 @@ export class WristMenu {
         [
           ['passive', 'Passive dummy'],
           ['defensive', 'Defensive'],
-          ['sparring', 'Sparring'],
+          ['sparring', 'Fights back'],
         ],
         () => s().opponentMode,
         (m) => this.set('opponentMode', m),

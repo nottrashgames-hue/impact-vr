@@ -115,6 +115,11 @@ export function paintGlove(geometry: BufferGeometry, body = 0xffffff, trim = 0xe
   geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
 }
 
+/** Size of a glove relative to the 10 oz model (heavier gloves have more padding). */
+export function gloveScale(weight: GloveWeight): number {
+  return 1 + ((weight - 10) / 6) * 0.12;
+}
+
 /** Right gloves meshed so far, by grid spacing. */
 const meshed = new Map<number, BufferGeometry>();
 
@@ -131,7 +136,7 @@ export function createGloveInFistFrame(side: Handedness, weight: GloveWeight, ce
   }
   const geometry = side === 'right' ? right.clone() : mirrorX(right);
   geometry.userData.gloveRegions = right.userData.gloveRegions;
-  const s = 1 + ((weight - 10) / 6) * 0.12;
+  const s = gloveScale(weight);
   const c = GLOVE_STRIKE_CENTER_IN_FIST;
   geometry.translate(-c.x, -c.y, -c.z).scale(s, s, s).translate(c.x, c.y, c.z);
   paintGlove(geometry);

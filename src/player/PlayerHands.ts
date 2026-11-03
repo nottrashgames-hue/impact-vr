@@ -14,7 +14,7 @@ import { smoothstep } from '../core/mathUtils';
 import type { StrikeSurface } from '../damage/Impact';
 import { VelocityTracker } from '../input/VelocityTracker';
 import type { Handedness, XRInput } from '../input/XRInput';
-import { createFistGeometry, PLAYER_SKIN_COLOR, strikeCenterInGrip } from './FistModel';
+import { createFistGeometry, fistSdf, fistToGripMatrix, PLAYER_SKIN_COLOR, strikeCenterInGrip } from './FistModel';
 import {
   BARE_FIST,
   type GearProfile,
@@ -24,7 +24,15 @@ import {
   gloveProfile,
   type GloveWeight,
 } from './GearProfile';
-import { createGloveGeometry, gloveStrikeCenterInGrip, paintGlove } from './GloveModel';
+import {
+  createGloveGeometry,
+  GLOVE_STRIKE_CENTER_IN_FIST,
+  gloveScale,
+  gloveSdf,
+  gloveStrikeCenterInGrip,
+  paintGlove,
+} from './GloveModel';
+import type { Sdf } from './SdfMesher';
 
 /** How a hand is currently driven. */
 export type HandDriver = 'controller' | 'hand' | 'desktop' | 'none';
@@ -117,6 +125,8 @@ export class PlayerHand {
   recentPeakSpeed = 0;
   private recentPeakTime = 0;
   private strikeInGrip: Vector3;
+  private readonly fistToGrip: Matrix4;
+  private readonly gripToFist: Matrix4;
   private _gear: GearProfile = BARE_FIST;
   private _gloveColor: GloveColor | null = null;
   private gloveWeight: GloveWeight = 12;
@@ -142,6 +152,9 @@ export class PlayerHand {
       mesh.visible = false;
     }
     this.strikeInGrip = strikeCenterInGrip(side);
+    // The left hand's meshes are the right hand's mirrored in x before this rotation.
+    this.fistToGrip = fistToGripMatrix(side);
+    this.gripToFist = this.fistToGrip.clone().invert();
   }
 
   get gear(): GearProfile {
@@ -219,6 +232,43 @@ export class PlayerHand {
   /** World point -> local space of the visible fist/glove mesh (for blood coating). */
   worldToMesh(world: Vector3, out: Vector3): Vector3 {
     return out.copy(world).applyMatrix4(_m.copy(this.gripMatrix).invert());
+  }
+
+  /**
+   * World point -> the nearest point on the visible fist/glove surface, in its
+   * local space: blood marks must sit on the surface to show (a droplet caught
+   * near the glove, or a contact point on the opponent's skin, may be a little
+   * inside or outside it).
+   */
+  surfacePoint(world: Vector3, out: Vector3): Vector3 {
+    this.worldToMesh(world, out);
+    // Grip space -> the right hand's fist frame, where the shapes are defined.
+    out.applyMatrix4(this.gripToFist);
+    if (this.side === 'left') out.x = -out.x;
+    const gloved = this._gloveColor !== null;
+    const c = GLOVE_STRIKE_CENTER_IN_FIST;
+    const s = gloveScale(this.gloveWeight);
+    if (gloved) out.sub(c).divideScalar(s).add(c);
+    const sdf: Sdf = gloved ? gloveSdf : fistSdf;
+    const h = 0.0005;
+    for (let i = 0; i < 4; i++) {
+      const d = sdf(out.x, out.y, out.z);
+      if (Math.abs(d) < 0.0003) break;
+      _a.set(
+        sdf(out.x + h, out.y, out.z) - sdf(out.x - h, out.y, out.z),
+        sdf(out.x, out.y + h, out.z) - sdf(out.x, out.y - h, out.z),
+        sdf(out.x, out.y, out.z + h) - sdf(out.x, out.y, out.z - h),
+      ).normalize();
+      out.addScaledVector(_a, -d);
+    }
+    if (gloved) out.sub(c).multiplyScalar(s).add(c);
+    if (this.side === 'left') out.x = -out.x;
+    return out.applyMatrix4(this.fistToGrip);
+  }
+
+  /** World direction -> local space of the visible fist/glove mesh. */
+  worldDirToMesh(world: Vector3, out: Vector3): Vector3 {
+    return out.copy(world).transformDirection(_m.copy(this.gripMatrix).invert());
   }
 
   private sample(time: number): void {
