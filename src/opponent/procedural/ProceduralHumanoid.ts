@@ -2,7 +2,6 @@ import {
   Bone,
   BufferGeometry,
   CanvasTexture,
-  CapsuleGeometry,
   Color,
   CylinderGeometry,
   Float32BufferAttribute,
@@ -22,6 +21,8 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
+import { smoothstep } from '../../core/mathUtils';
+import { createGloveInFistFrame, FAR_GLOVE_CELL, paintGlove } from '../../player/GloveModel';
 import { CANONICAL_BONES, type BoneMap, type CanonicalBone, type HeadProxy, type HumanoidRig } from '../HumanoidRig';
 import { MaskFaceRegions } from '../FaceRegions';
 import {
@@ -34,8 +35,7 @@ import {
   NECK_RINGS,
   neckDisplacement,
   OPPONENT_HEIGHT,
-  SHORTS_LEG_RINGS,
-  SHORTS_PELVIS_RINGS,
+  SHORTS_CROTCH_Y,
   TORSO_RINGS,
   torsoDisplacement,
 } from './BodyLayout';
@@ -43,6 +43,7 @@ import {
   type AtlasRect,
   blendAcross,
   blendByHeight,
+  type InfluenceFn,
   loftGeometry,
   placeLimb,
   rigid,
@@ -50,6 +51,7 @@ import {
 } from './geometryBuilders';
 import { buildHeadGeometry, EYE_RADIUS, headUV } from './HeadModel';
 import { buildFaceRegionMaps, paintEyeTexture, paintOpponentAlbedo } from './opponentTextures';
+import { buildShortsGeometry } from './Shorts';
 
 const GLOVE_COLOR = 0x1b2340;
 const TRIM_COLOR = 0xe8e8e8;
@@ -96,6 +98,18 @@ export function createProceduralHumanoid(textureSize: number): HumanoidRig {
   const idx = (name: CanonicalBone): number => boneIndex.get(name) as number;
   const rest = (name: CanonicalBone): Vector3 => BONE_REST[name].position;
 
+  // Below the waist, the skin and the trunks share one weighting, so the trunks
+  // move exactly with what is under them and never get poked through: the hips
+  // carry everything near the crotch line, the thighs take over further down.
+  const hipY = rest('LeftUpLeg').y;
+  const underShorts: InfluenceFn = (p) => {
+    const depth = smoothstep(-0.05, 0.07, hipY - p.y);
+    const lateral = smoothstep(0, 0.03, Math.abs(p.x));
+    const below = smoothstep(SHORTS_CROTCH_Y + 0.01, SHORTS_CROTCH_Y - 0.03, p.y);
+    return [idx('Hips'), idx(p.x >= 0 ? 'LeftUpLeg' : 'RightUpLeg'), depth * (lateral + (1 - lateral) * below)];
+  };
+  const WAIST_Y = 0.99;
+
   // Skin ----------------------------------------------------------------------
   const skin = new SkinnedGeometryBuilder();
 
@@ -120,11 +134,8 @@ export function createProceduralHumanoid(textureSize: number): HumanoidRig {
 
   const torso = loftGeometry(TORSO_RINGS, { segments: 48, capBottom: 0.01, capTop: 0.01, displace: torsoDisplacement });
   const torsoProxyGeometry = torso.clone();
-  skin.add(
-    torso,
-    blendByHeight([idx('Hips'), idx('Spine'), idx('Spine1'), idx('Spine2'), idx('Neck')], [1.02, 1.12, 1.24, 1.47], 0.04),
-    ATLAS.torso,
-  );
+  const torsoBlend = blendByHeight([idx('Hips'), idx('Spine'), idx('Spine1'), idx('Spine2'), idx('Neck')], [1.02, 1.12, 1.24, 1.47], 0.04);
+  skin.add(torso, (p, i) => (p.y > WAIST_Y ? torsoBlend(p, i) : underShorts(p, i)), ATLAS.torso);
 
   for (const side of SIDES) {
     const shoulder = rest(`${side}Arm`);
@@ -143,31 +154,24 @@ export function createProceduralHumanoid(textureSize: number): HumanoidRig {
     const ankle = rest(`${side}Foot`);
     const leg = placeLimb(loftGeometry(LEG_RINGS, { segments: 24, capBottom: 0.005, capTop: 0.02 }), hip, ankle);
     const legDir = new Vector3().subVectors(ankle, hip).normalize();
+    const kneeBlend = blendAcross(idx(`${side}UpLeg`), idx(`${side}Leg`), knee, legDir, 0.04);
     skin.add(
       leg,
-      blendAcross(idx(`${side}UpLeg`), idx(`${side}Leg`), knee, legDir, 0.04),
+      (p, i) => (p.y > knee.y + 0.08 ? underShorts(p, i) : kneeBlend(p, i)),
       side === 'Left' ? ATLAS.legLeft : ATLAS.legRight,
     );
   }
 
   // Shorts --------------------------------------------------------------------
+  // One continuous surface skinned by one function (shared with the skin
+  // underneath), so the waist and legs always move together and stay closed.
   const shorts = new SkinnedGeometryBuilder();
-  shorts.add(
-    loftGeometry(SHORTS_PELVIS_RINGS, { segments: 48, capBottom: 0.01 }),
-    blendByHeight([idx('Hips'), idx('Spine')], [1.03], 0.04),
-    ATLAS.shortsPelvis,
-  );
-  for (const side of SIDES) {
-    const hip = rest(`${side}UpLeg`);
-    const ankle = rest(`${side}Foot`);
-    const dir = new Vector3().subVectors(ankle, hip).normalize();
-    const sleeve = placeLimb(loftGeometry(SHORTS_LEG_RINGS, { segments: 28 }), hip, ankle);
-    shorts.add(
-      sleeve,
-      blendAcross(idx('Hips'), idx(`${side}UpLeg`), hip.clone().addScaledVector(dir, 0.03), dir, 0.05),
-      side === 'Left' ? ATLAS.shortsLegLeft : ATLAS.shortsLegRight,
-    );
-  }
+  const trunks = buildShortsGeometry(rest('LeftUpLeg'), rest('LeftFoot'));
+  const waistBlend = blendByHeight([idx('Hips'), idx('Spine')], [1.03], 0.04);
+  const shortsInfluence: InfluenceFn = (p, i) => (p.y > WAIST_Y ? waistBlend(p, i) : underShorts(p, i));
+  shorts.add(trunks.waist, shortsInfluence, ATLAS.shortsPelvis);
+  shorts.add(trunks.left, shortsInfluence, ATLAS.shortsLegLeft);
+  shorts.add(trunks.right, shortsInfluence, ATLAS.shortsLegRight);
 
   // Eyes ------------------------------------------------------------------------
   const eyes = new SkinnedGeometryBuilder();
@@ -181,9 +185,7 @@ export function createProceduralHumanoid(textureSize: number): HumanoidRig {
   const gear = new SkinnedGeometryBuilder();
   for (const side of SIDES) {
     const s = side === 'Left' ? 1 : -1;
-    for (const part of createGlove(s, rest(`${side}ForeArm`), rest(`${side}Hand`))) {
-      gear.add(part, rigid(idx(`${side}Hand`)));
-    }
+    gear.add(createGlove(s, rest(`${side}ForeArm`), rest(`${side}Hand`)), rigid(idx(`${side}Hand`)));
     for (const part of createBoot(rest(`${side}Foot`))) {
       gear.add(part, rigid(idx(`${side}Foot`)));
     }
@@ -335,25 +337,27 @@ function withColor(geometry: BufferGeometry, hex: number): BufferGeometry {
   return geometry;
 }
 
-/** Boxing glove in hand space (hanging along the forearm), moved into character rest space. */
-function createGlove(side: 1 | -1, elbow: Vector3, wrist: Vector3): BufferGeometry[] {
+/** Where the wrist sits along the player's glove model (fist frame z). */
+const WRIST_IN_GLOVE = 0.065;
+
+/**
+ * The player's glove model (meshed coarser) on the hand bone: in the rest pose
+ * the knuckles point down the forearm, the back of the hand faces out and the
+ * thumb forward; the cuff runs up the forearm. Moved into character rest space.
+ */
+function createGlove(side: 1 | -1, elbow: Vector3, wrist: Vector3): BufferGeometry {
+  const glove = createGloveInFistFrame(side === 1 ? 'left' : 'right', 12, FAR_GLOVE_CELL);
+  paintGlove(glove, GLOVE_COLOR, TRIM_COLOR);
+  // Fist frame (punch -Z, back of hand +Y, thumb on the mirrored side) -> hand space hanging along -Y.
+  const fistToHand = new Matrix4()
+    .makeBasis(new Vector3(0, 0, side), new Vector3(side, 0, 0), new Vector3(0, 1, 0))
+    .setPosition(0, -WRIST_IN_GLOVE, 0);
   const dir = new Vector3().subVectors(wrist, elbow).normalize();
   const q = new Quaternion().setFromUnitVectors(new Vector3(0, -1, 0), dir);
-  const place = new Matrix4().compose(wrist, q, new Vector3(1, 1, 1));
-  const thumbA = new Vector3(-0.028 * side, -0.045, 0.058);
-  const thumbB = new Vector3(-0.03 * side, -0.105, 0.06);
-  const thumbDir = new Vector3().subVectors(thumbB, thumbA);
-  const thumb = new CapsuleGeometry(0.022, thumbDir.length(), 4, 10)
-    .applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), thumbDir.clone().normalize()))
-    .translate((thumbA.x + thumbB.x) / 2, (thumbA.y + thumbB.y) / 2, (thumbA.z + thumbB.z) / 2);
-  const parts = [
-    withColor(new RoundedBoxGeometry(0.095, 0.15, 0.115, 3, 0.042).translate(0, -0.095, 0), GLOVE_COLOR),
-    withColor(thumb, GLOVE_COLOR),
-    withColor(new CylinderGeometry(0.05, 0.047, 0.1, 18), GLOVE_COLOR),
-    withColor(new CylinderGeometry(0.0515, 0.0515, 0.022, 18).translate(0, 0.018, 0), TRIM_COLOR),
-  ];
-  for (const p of parts) p.applyMatrix4(place);
-  return parts;
+  glove.applyMatrix4(fistToHand).applyMatrix4(new Matrix4().compose(wrist, q, new Vector3(1, 1, 1)));
+  // The gear mesh is merged with UV-mapped parts.
+  glove.setAttribute('uv', new Float32BufferAttribute(new Float32Array(glove.getAttribute('position').count * 2), 2));
+  return glove;
 }
 
 /** Boxing boot around the ankle joint. */

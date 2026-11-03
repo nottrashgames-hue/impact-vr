@@ -55,6 +55,7 @@ const HEAD_YAW_LIMIT = 0.9;
 const HEAD_PITCH_LIMIT = 0.5;
 
 const FORWARD = new Vector3(0, 0, 1);
+const UP = new Vector3(0, 1, 0);
 const _v = new Vector3();
 const _w = new Vector3();
 const _q = new Quaternion();
@@ -137,6 +138,18 @@ export class IdleAnimator {
       return { planted: p, from: p.clone(), t: -1 };
     };
     this.feet = { Left: foot('Left'), Right: foot('Right') };
+  }
+
+  /**
+   * The root moved by `delta` (character space) and turned by `yaw` about its
+   * origin: re-express the planted feet so they stay where they are in the world.
+   */
+  rebaseFeet(delta: Vector3, yaw: number): void {
+    for (const side of ['Left', 'Right'] as const) {
+      const foot = this.feet[side];
+      foot.planted.sub(delta).applyAxisAngle(UP, -yaw);
+      foot.from.sub(delta).applyAxisAngle(UP, -yaw);
+    }
   }
 
   /** Restarts timers and re-plants the feet (e.g. on opponent reset). */

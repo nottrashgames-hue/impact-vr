@@ -154,14 +154,15 @@ function paintShortsPelvis(c: RGB, lu: number, lv: number): void {
   if (stripe < 0.07) mix(c, GOLD, 1);
 }
 
-function paintShortsLeg(c: RGB, lu: number, lv: number, outerAngle: number): void {
+/** Trunk leg: u runs around from the inner seam (outer side at u = 0.5), v up from the hem. */
+function paintShortsLeg(c: RGB, lu: number, lv: number): void {
   c[0] = SHORTS_RED[0];
   c[1] = SHORTS_RED[1];
   c[2] = SHORTS_RED[2];
   const sheen = 0.9 + 0.12 * valueNoise(lu * 30, lv * 12);
   scale(c, sheen, sheen, sheen);
   const a = -Math.PI + 2 * Math.PI * lu;
-  if (Math.abs(a - outerAngle) < 0.12) mix(c, GOLD, 1);
+  if (Math.abs(a) < 0.12) mix(c, GOLD, 1);
   if (lv < 0.16) mix(c, WHITE, 1);
 }
 
@@ -201,10 +202,10 @@ export function paintOpponentAlbedo(size: number): HTMLCanvasElement {
         paintShortsPelvis(c, (u - ATLAS.shortsPelvis.u0) / ATLAS.shortsPelvis.w, (v - ATLAS.shortsPelvis.v0) / ATLAS.shortsPelvis.h);
       } else if (inRect(u, v, ATLAS.shortsLegLeft)) {
         const r = ATLAS.shortsLegLeft;
-        paintShortsLeg(c, (u - r.u0) / r.w, (v - r.v0) / r.h, Math.PI / 2);
+        paintShortsLeg(c, (u - r.u0) / r.w, (v - r.v0) / r.h);
       } else if (inRect(u, v, ATLAS.shortsLegRight)) {
         const r = ATLAS.shortsLegRight;
-        paintShortsLeg(c, (u - r.u0) / r.w, (v - r.v0) / r.h, -Math.PI / 2);
+        paintShortsLeg(c, (u - r.u0) / r.w, (v - r.v0) / r.h);
       }
 
       const i = (py * size + px) * 4;
@@ -222,7 +223,12 @@ export function paintOpponentAlbedo(size: number): HTMLCanvasElement {
   ctx.font = `900 ${Math.round(size * band.h * 0.14)}px system-ui, Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('IMPACT', (band.u0 + band.w * 0.5) * size, (1 - (band.v0 + band.h * 0.9)) * size);
+  // The band's texels are wider (around the waist) than they are tall: squeeze the text to compensate.
+  ctx.save();
+  ctx.translate((band.u0 + band.w * 0.5) * size, (1 - (band.v0 + band.h * 0.9)) * size);
+  ctx.scale(0.7, 1);
+  ctx.fillText('IMPACT', 0, 0);
+  ctx.restore();
   return canvas;
 }
 

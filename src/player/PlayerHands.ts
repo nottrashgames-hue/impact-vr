@@ -15,8 +15,16 @@ import type { StrikeSurface } from '../damage/Impact';
 import { VelocityTracker } from '../input/VelocityTracker';
 import type { Handedness, XRInput } from '../input/XRInput';
 import { createFistGeometry, PLAYER_SKIN_COLOR, strikeCenterInGrip } from './FistModel';
-import { BARE_FIST, type GearProfile, GLOVE_COLORS, type GloveColor, gloveProfile, type GloveWeight } from './GearProfile';
-import { createGloveGeometry, gloveStrikeCenterInGrip } from './GloveModel';
+import {
+  BARE_FIST,
+  type GearProfile,
+  GLOVE_COLORS,
+  GLOVE_TRIM_COLORS,
+  type GloveColor,
+  gloveProfile,
+  type GloveWeight,
+} from './GearProfile';
+import { createGloveGeometry, gloveStrikeCenterInGrip, paintGlove } from './GloveModel';
 
 /** How a hand is currently driven. */
 export type HandDriver = 'controller' | 'hand' | 'desktop' | 'none';
@@ -117,11 +125,13 @@ export class PlayerHand {
   static readonly PEAK_HOLD = 1.5;
 
   constructor(readonly side: Handedness) {
-    const skin = new MeshStandardMaterial({ name: `player-skin-${side}`, color: PLAYER_SKIN_COLOR, roughness: 0.62, metalness: 0 });
+    // Colours (skin tones, glove colour and trim, crease shading) are baked into the vertex colours.
+    const skin = new MeshStandardMaterial({ name: `player-skin-${side}`, vertexColors: true, roughness: 0.58, metalness: 0 });
     this.coating.attach(skin);
     this.fist = new Mesh(createFistGeometry(side), skin);
     this.fist.name = `fist-${side}`;
-    const gloveMaterial = new MeshStandardMaterial({ name: `glove-${side}`, vertexColors: true, roughness: 0.38, metalness: 0 });
+    // Glossy leather.
+    const gloveMaterial = new MeshStandardMaterial({ name: `glove-${side}`, vertexColors: true, roughness: 0.3, metalness: 0 });
     this.coating.attach(gloveMaterial);
     this.glove = new Mesh(createGloveGeometry(side, this.gloveWeight), gloveMaterial);
     this.glove.name = `glove-${side}`;
@@ -172,7 +182,7 @@ export class PlayerHand {
     }
     if (color !== this._gloveColor) this.coating.clear(); // fresh glove / bare knuckles
     this._gloveColor = color;
-    if (color) (this.glove.material as MeshStandardMaterial).color.setHex(GLOVE_COLORS[color]);
+    if (color) paintGlove(this.glove.geometry, GLOVE_COLORS[color], GLOVE_TRIM_COLORS[color]);
     this._gear = color ? gloveProfile(weight) : BARE_FIST;
     this.strikeInGrip = color ? gloveStrikeCenterInGrip(this.side) : strikeCenterInGrip(this.side);
     this.fist.visible = false;

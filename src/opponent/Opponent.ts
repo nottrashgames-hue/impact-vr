@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { type Bone, Euler, Matrix4, Quaternion, Raycaster, type Scene, Vector2, Vector3 } from 'three';
-import { KNOCKOUT, WORLD } from '../config';
+import { KNOCKOUT, RING, WORLD } from '../config';
+import { clamp } from '../core/mathUtils';
 import { COLLISION_GROUP, interactionGroups, type Physics } from '../core/Physics';
 import type { QualityPreset } from '../core/Quality';
 import type { Impact } from '../damage/Impact';
@@ -51,12 +52,23 @@ const KNOCKOUT_IMPULSE = 1.6;
 const KNOCKOUT_CHEST_IMPULSE = 0.8;
 /** Shove on an already-downed body. */
 const DOWNED_IMPULSE = 1.2;
+/** His root stays at least this far inside the ropes (m). */
+const ROPE_CLEARANCE = 0.45;
+/** Turning to face the player: starts beyond TURN_START, settles within TURN_STOP (radians), at up to TURN_RATE rad/s. */
+const TURN_START = 0.25;
+const TURN_STOP = 0.04;
+const TURN_RATE = 2.2;
 
 const _origin = new Vector3();
 const _dir = new Vector3();
 const _inv = new Matrix4();
 const _q = new Quaternion();
+const _qInv = new Quaternion();
 const _e = new Euler();
+const _drift = new Vector3();
+const _move = new Vector3();
+const _axis = new Vector3();
+const _scale = new Vector3();
 
 interface PoseSnapshot {
   readonly bone: Bone;
@@ -74,6 +86,8 @@ export class Opponent {
   private readonly rest: RestPose;
   private readonly raycaster = new Raycaster();
   private readonly allBones: Bone[] = [];
+  /** Bones whose parent is not a bone (the hierarchy roots under the rig root). */
+  private readonly topBones: Bone[] = [];
   private debugView = false;
   /** After a knockout: wait for a reset ('prompt') or stand back up ('getUp'). */
   koRecovery: 'prompt' | 'getUp' = KNOCKOUT.recovery;
@@ -83,6 +97,8 @@ export class Opponent {
   /** Seconds spent in the current state. */
   private stateTime = 0;
   private getUpFrom: PoseSnapshot[] = [];
+  private turning = false;
+  private readonly lastLookAt = new Vector3(WORLD.playerSpawnX, 1.6, WORLD.playerSpawnZ);
 
   constructor(
     scene: Scene,
@@ -95,7 +111,9 @@ export class Opponent {
     rig.root.rotation.set(0, 0, 0); // faces +Z, towards the player
     scene.add(rig.root);
     rig.root.traverse((o) => {
-      if ((o as Bone).isBone) this.allBones.push(o as Bone);
+      if (!(o as Bone).isBone) return;
+      this.allBones.push(o as Bone);
+      if (!(o.parent as Bone | null)?.isBone) this.topBones.push(o as Bone);
     });
 
     this.reactions = new HitReactions(rig);
@@ -172,11 +190,14 @@ export class Opponent {
     this.hitboxes.syncDebug();
   }
 
-  /** Back to a clean, standing idle state (damage and blood reset is handled by their systems). */
+  /** Back to a clean, standing idle state in the middle of the ring (damage and blood reset is handled by their systems). */
   reset(): void {
     this.ragdoll.deactivate();
     this.reactions.reset();
     this.animator.reset();
+    this.rig.root.position.set(WORLD.opponentX, 0, WORLD.opponentZ);
+    this.rig.root.rotation.set(0, 0, 0);
+    this.turning = false;
     this.setState('standing');
     this.rig.root.updateMatrixWorld(true);
     this.hitboxes.sync(true);
@@ -218,6 +239,7 @@ export class Opponent {
   /** Begins the automatic get-up (blend from the ragdoll pose back to the guard). */
   getUp(): void {
     if (this._state !== 'knockedOut') return;
+    this.moveRootUnderBody();
     this.getUpFrom = this.allBones.map((bone) => ({
       bone,
       position: bone.position.clone(),
@@ -248,8 +270,10 @@ export class Opponent {
    */
   update(dt: number, time: number, lookAt: Vector3, alpha: number, fatigue: number): void {
     this.stateTime += dt;
+    this.lastLookAt.copy(lookAt);
     switch (this._state) {
       case 'standing':
+        this.settle(dt, lookAt);
         this.animator.update(time, lookAt, fatigue);
         this.hitboxes.sync();
         break;
@@ -275,6 +299,62 @@ export class Opponent {
         break;
       }
     }
+  }
+
+  /**
+   * Carries the root along with the body's drift, so he stays wherever a
+   * punch or a shove left him (inside the ropes), and turns him to keep
+   * facing the player. The feet are re-based so they stay planted and then
+   * step after the body.
+   */
+  private settle(dt: number, lookAt: Vector3): void {
+    const root = this.rig.root;
+    _qInv.copy(root.quaternion).invert();
+    _move.copy(this.reactions.takeDrift(_drift)).applyQuaternion(root.quaternion);
+    const limit = RING.ropeHalfExtent - ROPE_CLEARANCE;
+    const x = clamp(root.position.x + _move.x, -limit, limit);
+    const z = clamp(root.position.z + _move.z, -limit, limit);
+    if (x !== root.position.x + _move.x) this.reactions.blockDrift(_axis.set(Math.sign(_move.x), 0, 0).applyQuaternion(_qInv));
+    if (z !== root.position.z + _move.z) this.reactions.blockDrift(_axis.set(0, 0, Math.sign(_move.z)).applyQuaternion(_qInv));
+    _drift.set(x - root.position.x, 0, z - root.position.z).applyQuaternion(_qInv);
+    root.position.x = x;
+    root.position.z = z;
+
+    let yaw = 0;
+    const dx = lookAt.x - x;
+    const dz = lookAt.z - z;
+    if (dx * dx + dz * dz > 0.25 * 0.25) {
+      let error = Math.atan2(dx, dz) - root.rotation.y;
+      error = Math.atan2(Math.sin(error), Math.cos(error));
+      if (Math.abs(error) > TURN_START) this.turning = true;
+      else if (Math.abs(error) < TURN_STOP) this.turning = false;
+      if (this.turning) yaw = Math.sign(error) * Math.min(Math.abs(error), TURN_RATE * dt);
+    }
+    this.animator.rebaseFeet(_drift, yaw);
+    root.rotation.y = Math.atan2(Math.sin(root.rotation.y + yaw), Math.cos(root.rotation.y + yaw));
+  }
+
+  /**
+   * Before getting up: move the root to where the body lies (facing the
+   * player) without moving any bone in the world, so he rises on that spot.
+   */
+  private moveRootUnderBody(): void {
+    const root = this.rig.root;
+    root.updateMatrixWorld(true);
+    const hips = this.rig.bones.Hips.getWorldPosition(_origin);
+    const limit = RING.ropeHalfExtent - ROPE_CLEARANCE;
+    const x = clamp(hips.x, -limit, limit);
+    const z = clamp(hips.z, -limit, limit);
+    const saved = this.topBones.map((bone) => bone.matrixWorld.clone());
+    root.position.set(x, 0, z);
+    root.rotation.set(0, Math.atan2(this.lastLookAt.x - x, this.lastLookAt.z - z), 0);
+    root.updateMatrixWorld(true);
+    this.topBones.forEach((bone, i) => {
+      const parent = bone.parent ?? root;
+      _inv.copy(parent.matrixWorld).invert().multiply(saved[i]).decompose(bone.position, bone.quaternion, _scale);
+    });
+    root.updateMatrixWorld(true);
+    this.turning = false;
   }
 
   /** Eyes mostly shut and jaw slack while out cold. */

@@ -53,6 +53,7 @@ import { type XRSessionInfo, XRSessionManager } from './XRSessionManager';
 const DESKTOP_DISPLAY_RATE = 60;
 
 const _headPos = new Vector3();
+const _opponentPos = new Vector3();
 const _headQuat = new Quaternion();
 const _rayOrigin = new Vector3();
 const _rayDir = new Vector3();
@@ -366,6 +367,9 @@ export class App {
     this.brain.update(dt, _headPos);
     this.opponent.setEyeClosure(this.injuries.eyeClosure('eyeLeft'), this.injuries.eyeClosure('eyeRight'));
     this.opponent.update(dt, this.elapsed, _headPos, alpha, this.damage.fatigue);
+    // He no longer stays on his spawn spot: keep the key light (and its shadow) on him.
+    this.opponent.rig.bones.Hips.getWorldPosition(_opponentPos);
+    this.gym.lights.key.target.position.set(_opponentPos.x, 0.9, _opponentPos.z);
     // Blood moves with the freshly posed body; then offscreen paint (queued stamps, aging) before the main render.
     this.blood.update(dt, this.renderer);
     this.visor.update(dt);
@@ -466,6 +470,11 @@ export class App {
     if (opponent.state !== 'knockedOut' || opponent.timeInState < KNOCKOUT.promptDelay) {
       this.knockoutPrompt.hide();
       return;
+    }
+    if (!this.knockoutPrompt.mesh.visible) {
+      // Over wherever he went down, facing the player.
+      opponent.rig.bones.Hips.getWorldPosition(_opponentPos).setY(1.7);
+      this.knockoutPrompt.place(_opponentPos, this.camera.getWorldPosition(_headPos));
     }
     if (opponent.koRecovery === 'getUp') {
       const left = Math.max(0, Math.ceil(KNOCKOUT.getUpDelay - opponent.timeInState));

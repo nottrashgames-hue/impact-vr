@@ -162,24 +162,33 @@ export const LEG_RINGS: readonly LoftRing[] = [
   { y: 0.05, rx: 0.07, rz: 0.07 },
 ];
 
-/** Shorts around the pelvis (character space), with the waistband folding inwards at the top. */
+/**
+ * Trunks around the pelvis (character space), from where the legs split off
+ * (first ring) up to the waistband folding inwards at the top.
+ */
 export const SHORTS_PELVIS_RINGS: readonly LoftRing[] = [
-  { y: 0.8, rx: 0.135, rz: 0.098, dz: -0.006 },
-  { y: 0.86, rx: 0.176, rz: 0.12, dz: -0.012 },
-  { y: 0.93, rx: 0.181, rz: 0.122, dz: -0.012 },
+  { y: 0.875, rx: 0.18, rz: 0.13, dz: -0.006 },
+  { y: 0.93, rx: 0.184, rz: 0.136, dz: -0.006 },
+  { y: 0.97, rx: 0.178, rz: 0.126, dz: -0.004 },
   { y: 1.0, rx: 0.171, rz: 0.114, dz: -0.006 },
+  { y: 1.03, rx: 0.165, rz: 0.11, dz: -0.002 },
   { y: 1.06, rx: 0.161, rz: 0.107, dz: 0.001 },
   { y: 1.09, rx: 0.159, rz: 0.106, dz: 0.004 },
   { y: 1.093, rx: 0.146, rz: 0.096, dz: 0.005 },
 ];
 
-/** Shorts leg sleeves: `y` = -distance from the hip joint, hem folding inwards at the bottom. */
+/** Lowest point of the crotch seam where the two legs of the trunks meet. */
+export const SHORTS_CROTCH_Y = 0.8;
+
+/**
+ * Trunk legs below the crotch: `y` = -distance below the hip joint (ascending
+ * from the hem, which folds inwards). The crotch seam blends into the last ring.
+ */
 export const SHORTS_LEG_RINGS: readonly LoftRing[] = [
-  { y: -0.225, rx: 0.07, rz: 0.073 },
-  { y: -0.22, rx: 0.084, rz: 0.087 },
-  { y: -0.12, rx: 0.093, rz: 0.096 },
-  { y: -0.02, rx: 0.099, rz: 0.102 },
-  { y: 0.04, rx: 0.095, rz: 0.098 },
+  { y: -0.225, rx: 0.076, rz: 0.08 },
+  { y: -0.22, rx: 0.09, rz: 0.095 },
+  { y: -0.185, rx: 0.092, rz: 0.098 },
+  { y: -0.15, rx: 0.094, rz: 0.102 },
 ];
 
 /** Heights of the torso rings, for converting torso UV v back to a height. */

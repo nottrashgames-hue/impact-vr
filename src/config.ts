@@ -72,12 +72,17 @@ export const PUNCH = {
   openHandMultiplier: 0.25,
 } as const;
 
+/** How much punishment the opponent soaks before going down (1 = the original tuning). */
+const TOUGHNESS = 4;
+
 /** Knockout rules (Section 3). */
 export const KNOCKOUT = {
-  /** A single hit whose knockout contribution reaches this drops the opponent. */
+  /** Knockout contributions are divided by this: it takes this many times the damage to drop him. */
+  toughness: TOUGHNESS,
+  /** A single hit whose (toughness-scaled) knockout contribution reaches this drops the opponent. */
   singleHitThreshold: 70,
   /** Knockout meter (0..100) recovery per second, after `meterRecoveryDelay` without head damage. */
-  meterRecoveryPerSecond: 4,
+  meterRecoveryPerSecond: 4 / TOUGHNESS,
   meterRecoveryDelay: 1.5,
   /** 'prompt' waits for a reset; 'getUp' stands back up automatically (override with ?ko=getup). */
   recovery: (params.get('ko') === 'getup' ? 'getUp' : 'prompt') as 'prompt' | 'getUp',

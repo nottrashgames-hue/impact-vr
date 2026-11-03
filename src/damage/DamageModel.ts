@@ -73,7 +73,7 @@ export class DamageModel {
     state.hits++;
     state.sinceLastHit = 0;
 
-    const knockoutContribution = damage * zone.knockoutFactor;
+    const knockoutContribution = (damage * zone.knockoutFactor) / KNOCKOUT.toughness;
     let knockout = false;
     if (!this.knockedOut) {
       this.knockoutMeter = Math.min(100, this.knockoutMeter + knockoutContribution);

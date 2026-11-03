@@ -14,6 +14,13 @@ export const GLOVE_COLORS: Readonly<Record<GloveColor, number>> = {
   blue: 0x1d3f8f,
   white: 0xe8e8e8,
 };
+/** Strap, cuff lip and badge colour for each glove. */
+export const GLOVE_TRIM_COLORS: Readonly<Record<GloveColor, number>> = {
+  red: 0xf2f0ec,
+  black: 0xb8202a,
+  blue: 0xf2f0ec,
+  white: 0x18191c,
+};
 export const GLOVE_COLOR_NAMES = Object.keys(GLOVE_COLORS) as GloveColor[];
 export const GLOVE_WEIGHTS: readonly GloveWeight[] = [10, 12, 16];
 

@@ -11,8 +11,9 @@ import { rotateWorld } from './IK';
  * spring that pulls it back to the animation: the struck bone and its parents
  * up the chain receive an angular impulse from the punch (lever arm × hit
  * direction × speed), swing, and settle back. The whole body also staggers
- * (a positional spring the feet step to follow), heavy head shots buckle the
- * knees, stomach shots fold the torso forward and drop the guard.
+ * (a drift slowed only by friction: he ends up where he was knocked or
+ * shoved, the feet stepping after it), heavy head shots buckle the knees,
+ * stomach shots fold the torso forward and drop the guard.
  *
  * Full ragdoll (knockout) is handled separately by Rapier rigid bodies.
  */
@@ -69,11 +70,14 @@ function regionOf(bone: CanonicalBone): Region {
   return 'legs';
 }
 
-/** Stagger impulse (m/s of body drift per m/s of punch) by tier. */
-const STAGGER = [0.03, 0.13, 0.17, 0.2];
-const BODY_K = 14;
-const BODY_C = 2 * 0.8 * Math.sqrt(BODY_K);
-const BODY_MAX = 0.32;
+/**
+ * Stagger impulse (m/s of body drift per m/s of punch) by tier. With
+ * {@link BODY_FRICTION} a heavy 6 m/s shot moves him back about 11 cm.
+ */
+const STAGGER = [0.02, 0.08, 0.11, 0.14];
+/** Drift decay rate (1/s): how quickly his footwork stops a shove. There is no pull back to a home spot. */
+const BODY_FRICTION = 6;
+const BODY_MAX_SPEED = 2.5;
 /** Contact pushes: spring torque per (m · m/s²), times the chain's gain. */
 const PUSH_TWIST = 2;
 const DROP_K = 30;
@@ -97,7 +101,10 @@ const _rootInv = new Quaternion();
 const _right = new Vector3();
 
 export class HitReactions {
-  /** Body drift in character space (x/z), followed by the hips; the feet step after it. */
+  /**
+   * Body drift in character space (x/z) since the opponent last absorbed it
+   * into the root (see {@link takeDrift}); the hips follow it and the feet step after it.
+   */
   readonly bodyOffset = new Vector3();
   private readonly bodyVelocity = new Vector3();
   /** Vertical hip offset (negative = knees buckling). */
@@ -226,15 +233,27 @@ export class HitReactions {
       }
     }
 
-    this.bodyVelocity.addScaledVector(this.bodyOffset, -BODY_K * dt).multiplyScalar(Math.max(0, 1 - BODY_C * dt));
+    this.bodyVelocity.multiplyScalar(Math.max(0, 1 - BODY_FRICTION * dt)).clampLength(0, BODY_MAX_SPEED);
     this.bodyOffset.addScaledVector(this.bodyVelocity, dt);
-    if (this.bodyOffset.length() > BODY_MAX) this.bodyOffset.setLength(BODY_MAX);
 
     this.hipDropVelocity = (this.hipDropVelocity - DROP_K * this.hipDrop * dt) * Math.max(0, 1 - DROP_C * dt);
     this.hipDrop = Math.min(0.02, Math.max(-0.15, this.hipDrop + this.hipDropVelocity * dt));
 
     this.guardDrop *= Math.exp(-dt / 0.6);
     this.flinch = Math.max(0, this.flinch - dt * 4);
+  }
+
+  /** Moves the accumulated drift into `out` (character space) and zeroes it; the caller moves the root. */
+  takeDrift(out: Vector3): Vector3 {
+    out.copy(this.bodyOffset);
+    this.bodyOffset.set(0, 0, 0);
+    return out;
+  }
+
+  /** Stops any drift along a character-space direction (e.g. backed into the ropes). */
+  blockDrift(direction: Vector3): void {
+    const along = this.bodyVelocity.dot(direction);
+    if (along > 0) this.bodyVelocity.addScaledVector(direction, -along);
   }
 
   /** Adds the spring rotations on top of the animated pose (call after animation/IK). */
